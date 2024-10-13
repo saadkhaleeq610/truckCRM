@@ -1,166 +1,123 @@
 import React, { useState } from 'react';
 import { Canvas } from '@react-three/fiber';
 import { OrbitControls } from '@react-three/drei';
-
-// A component to represent the truck container
-function TruckContainer({ items, totalVolume }) {
-  const width = 4;
-  const height = 2;
-  const depth = 6;
-
-  return (
-    <>
-      {/* Outer box representing the truck container */}
-      <mesh position={[0, height / 2, 0]}>
-        <boxGeometry args={[width, height, depth]} />
-        <meshStandardMaterial color="lightblue" wireframe />
-      </mesh>
-
-      {/* Render each item inside the container */}
-      {items.map((item, index) => (
-        <mesh
-          key={index}
-          position={item.position}
-          scale={[item.width, item.height, item.depth]}
-        >
-          <boxGeometry args={[1, 1, 1]} />
-          <meshStandardMaterial color="blue" />
-        </mesh>
-      ))}
-    </>
-  );
-}
-
-// Form component for adding items
-function ItemForm({ onAddItem }) {
-  const [width, setWidth] = useState(1);
-  const [height, setHeight] = useState(1);
-  const [depth, setDepth] = useState(1);
-  const [quantity, setQuantity] = useState(1);
-
-  const handleSubmit = (e) => {
-    e.preventDefault();
-    const itemVolume = width * height * depth * quantity;
-    onAddItem({ width, height, depth, quantity, volume: itemVolume });
-  };
-
-  return (
-    <form onSubmit={handleSubmit} style={{ marginTop: '20px' }}>
-      <div>
-        <label>Width: </label>
-        <input
-          type="number"
-          value={width}
-          onChange={(e) => setWidth(Math.max(1, e.target.value))}
-          min="1"
-        />
-      </div>
-      <div>
-        <label>Height: </label>
-        <input
-          type="number"
-          value={height}
-          onChange={(e) => setHeight(Math.max(1, e.target.value))}
-          min="1"
-        />
-      </div>
-      <div>
-        <label>Depth: </label>
-        <input
-          type="number"
-          value={depth}
-          onChange={(e) => setDepth(Math.max(1, e.target.value))}
-          min="1"
-        />
-      </div>
-      <div>
-        <label>Quantity: </label>
-        <input
-          type="number"
-          value={quantity}
-          onChange={(e) => setQuantity(Math.max(1, e.target.value))}
-          min="1"
-        />
-      </div>
-      <button type="submit">Add Item</button>
-    </form>
-  );
-}
+import TruckContainer from './TruckContainer';
+import ItemForm from './ItemForm';
+import { v4 as uuidv4 } from 'uuid';
 
 function App() {
-  const totalVolume = 48; // Total volume of the truck container
+  const totalVolume = 48;
   const [occupiedVolume, setOccupiedVolume] = useState(0);
   const [items, setItems] = useState([]);
 
-  // Add the item to the list of items in the container
-  const addItem = ({ width, height, depth, quantity, volume }) => {
+  const addItem = ({ width, height, depth, quantity, volume, color }) => {
     const newOccupiedVolume = occupiedVolume + volume;
-    
-    // Check if there's enough space
+
     if (newOccupiedVolume > totalVolume) {
-      alert("Not enough space in the container!");
+      alert('Not enough space in the container!');
       return;
     }
 
-    // Create new items and place them inside the container
     const newItems = [];
     for (let i = 0; i < quantity; i++) {
-      const position = calculatePosition(items, width, height, depth); // Calculate a position for each new item
-      newItems.push({ width, height, depth, position });
+      const position = calculatePosition(items, width, height, depth);
+      if (!position) {
+        alert('Cannot place more items due to space constraints!');
+        break;
+      }
+      newItems.push({
+        id: uuidv4(),
+        width,
+        height,
+        depth,
+        position,
+        color, 
+      });
     }
 
     setItems([...items, ...newItems]);
-    setOccupiedVolume(newOccupiedVolume);
+    setOccupiedVolume(
+      prev =>
+        prev + newItems.reduce((acc, item) => acc + item.width * item.height * item.depth, 0)
+    );
   };
 
-  // Simple function to calculate where to place the item based on existing ones
   const calculatePosition = (existingItems, width, height, depth) => {
     const containerWidth = 4;
     const containerHeight = 2;
     const containerDepth = 6;
 
-    // Basic logic: Start placing items from the bottom left corner and stack along the z-axis, then x, then y
-    let x = 0, y = 0, z = 0;
 
-    // Iterate through existing items to find the next free position
-    for (const item of existingItems) {
-      x += item.width;
-      if (x + width > containerWidth) {
-        x = 0;
-        z += item.depth;
-        if (z + depth > containerDepth) {
-          z = 0;
-          y += item.height;
+    const gridSize = 1; 
+
+    const gridColumns = Math.floor(containerWidth / gridSize);
+    const gridRows = Math.floor(containerDepth / gridSize);
+
+    const heightMap = Array.from({ length: gridColumns }, () =>
+      Array.from({ length: gridRows }, () => 0)
+    );
+
+    existingItems.forEach(item => {
+      const gridX = Math.floor((item.position[0] + containerWidth / 2) / gridSize);
+      const gridZ = Math.floor((item.position[2] + containerDepth / 2) / gridSize);
+      if (gridX >= 0 && gridX < gridColumns && gridZ >= 0 && gridZ < gridRows) {
+        const itemTop = item.position[1] + item.height / 2;
+        if (itemTop > heightMap[gridX][gridZ]) {
+          heightMap[gridX][gridZ] = itemTop;
+        }
+      }
+    });
+
+    for (let x = 0; x < gridColumns; x++) {
+      for (let z = 0; z < gridRows; z++) {
+        const currentHeight = heightMap[x][z];
+        if (currentHeight + height <= containerHeight) {
+          const posX = x * gridSize - containerWidth / 2 + gridSize / 2;
+          const posY = currentHeight + height / 2;
+          const posZ = z * gridSize - containerDepth / 2 + gridSize / 2;
+
+          heightMap[x][z] += height;
+
+          return [posX, posY, posZ];
         }
       }
     }
 
-    // If the calculated y exceeds container height, prevent placing more items
-    if (y + height > containerHeight) {
-      alert("Not enough vertical space for this item!");
-      return [0, 0, 0]; // Reset the position to indicate an error
-    }
+    return null;
+  };
 
-    return [x + width / 2 - containerWidth / 2, y + height / 2, z + depth / 2 - containerDepth / 2];
+  const updateItemPosition = (id, newPosition) => {
+    setItems(prevItems =>
+      prevItems.map(item => (item.id === id ? { ...item, position: newPosition } : item))
+    );
   };
 
   return (
     <>
-      <Canvas>
-        <ambientLight />
-        <pointLight position={[10, 10, 10]} />
-        <TruckContainer items={items} totalVolume={totalVolume} />
+      <Canvas shadows camera={{ position: [10, 10, 10], fov: 50 }}>
+        <ambientLight intensity={0.5} />
+        <pointLight position={[10, 10, 10]} intensity={1} castShadow />
+        <TruckContainer items={items} totalVolume={totalVolume} onUpdatePosition={updateItemPosition} />
         <OrbitControls />
       </Canvas>
 
       <div style={{ padding: '20px' }}>
         <h2>Truck Container</h2>
-        <p>Occupied Volume: {occupiedVolume} / {totalVolume} cubic units</p>
+        <p>
+          Occupied Volume: {occupiedVolume} / {totalVolume} cubic units
+        </p>
 
-        {/* Render the form to input item dimensions and quantity */}
         <ItemForm onAddItem={addItem} />
 
-        <button onClick={() => { setOccupiedVolume(0); setItems([]); }} style={{ marginTop: '10px' }}>Reset</button>
+        <button
+          onClick={() => {
+            setOccupiedVolume(0);
+            setItems([]);
+          }}
+          style={{ marginTop: '10px' }}
+        >
+          Reset
+        </button>
       </div>
     </>
   );
